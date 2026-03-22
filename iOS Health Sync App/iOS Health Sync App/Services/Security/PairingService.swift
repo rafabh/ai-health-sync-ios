@@ -9,7 +9,7 @@ import SwiftData
 actor PairingService {
     private let modelContainer: ModelContainer
     private var pendingSession: PendingPairing?
-    private let tokenTTL: TimeInterval = 60 * 60 * 24 * 30
+    private let tokenTTL: TimeInterval = 60 * 60 * 24 * 365
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer

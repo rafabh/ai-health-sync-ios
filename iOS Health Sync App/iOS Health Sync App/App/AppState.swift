@@ -4,6 +4,7 @@
 import CryptoKit
 import Foundation
 import HealthKit
+import Network
 import Observation
 import os
 import SwiftData
@@ -56,7 +57,8 @@ final class AppState {
                     let shortHash = hash.prefix(4).map { String(format: "%02x", $0) }.joined()
                     return "HealthSync-\(shortHash.uppercased())"
                 }
-            }
+            },
+            listenerPort: NWEndpoint.Port(rawValue: 48484)!
         )
 
         // Pre-warm TLS identity on a background thread to avoid first-run UI stalls.

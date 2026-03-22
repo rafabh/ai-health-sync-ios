@@ -273,7 +273,7 @@ actor NetworkServer {
     }
 
     /// Default limit for health data queries
-    private static let defaultLimit = 1000
+    private static let defaultLimit = 5000
     /// Maximum allowed limit per request
     private static let maxLimit = 10_000
 
