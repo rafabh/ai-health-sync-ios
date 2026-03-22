@@ -65,7 +65,7 @@ actor HealthKitService {
     }
 
     /// Maximum samples per request to prevent memory exhaustion
-    private static let maxSamplesPerRequest = 10_000
+    private static let maxSamplesPerRequest = 5_000
 
     func fetchSamples(types: [HealthDataType], startDate: Date, endDate: Date, limit: Int, offset: Int) async -> HealthDataResponse {
         guard isAvailable() else {

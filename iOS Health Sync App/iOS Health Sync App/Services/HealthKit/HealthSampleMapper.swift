@@ -9,6 +9,9 @@ struct HealthSampleMapper {
         let sourceName = sample.sourceRevision.source.name
         if let quantitySample = sample as? HKQuantitySample {
             let unit = unitForQuantityType(requestedType)
+            guard quantitySample.quantity.is(compatibleWith: unit) else {
+                return nil
+            }
             let value = quantitySample.quantity.doubleValue(for: unit)
             return HealthSampleDTO(
                 id: quantitySample.uuid,
@@ -90,8 +93,10 @@ struct HealthSampleMapper {
 
     static func unitForQuantityType(_ type: HealthDataType) -> HKUnit {
         switch type {
-        case .steps, .standHours, .flightsClimbed:
+        case .steps, .flightsClimbed:
             return .count()
+        case .standHours:
+            return .second()
         case .distanceWalkingRunning, .distanceCycling:
             return .meter()
         case .activeEnergyBurned, .basalEnergyBurned:

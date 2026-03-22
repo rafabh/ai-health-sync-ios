@@ -31,6 +31,10 @@ actor NetworkServer {
     private let maxRequestDuration: TimeInterval = 10
     private let startTimeout: TimeInterval = 5
     private let listenerPortOverride: NWEndpoint.Port?
+    private let maxConcurrentConnections = 3
+    private var activeConnections = 0
+    private var cachedEnabledTypes: [HealthDataType]?
+    private var cachedEnabledTypesDate: Date?
 
     init(
         healthService: HealthDataProviding,
@@ -84,7 +88,15 @@ actor NetworkServer {
 
             listener.newConnectionHandler = { [weak self] connection in
                 guard let self else { return }
-                Task { await self.handleConnection(connection) }
+                Task {
+                    let canProceed = await self.acquireConnection()
+                    guard canProceed else {
+                        connection.cancel()
+                        return
+                    }
+                    await self.handleConnection(connection)
+                    await self.releaseConnection()
+                }
             }
 
             try await awaitReady(listener, queue: .global())
@@ -339,7 +351,12 @@ actor NetworkServer {
     }
 
     private func loadEnabledTypes() async -> [HealthDataType] {
-        await MainActor.run {
+        // Cache for 30 seconds to avoid MainActor contention under load
+        if let cached = cachedEnabledTypes, let date = cachedEnabledTypesDate,
+           Date().timeIntervalSince(date) < 30 {
+            return cached
+        }
+        let types = await MainActor.run {
             let context = modelContainer.mainContext
             let descriptor = FetchDescriptor<SyncConfiguration>()
             do {
@@ -351,6 +368,9 @@ actor NetworkServer {
             }
             return HealthDataType.allCases
         }
+        cachedEnabledTypes = types
+        cachedEnabledTypesDate = Date()
+        return types
     }
 
     private func updateLastExport() async {
@@ -378,6 +398,19 @@ actor NetworkServer {
         return String(parts[1])
     }
 
+    private func acquireConnection() -> Bool {
+        guard activeConnections < maxConcurrentConnections else {
+            AppLoggers.network.warning("Connection rejected: \(self.activeConnections)/\(self.maxConcurrentConnections) active")
+            return false
+        }
+        activeConnections += 1
+        return true
+    }
+
+    private func releaseConnection() {
+        activeConnections = max(0, activeConnections - 1)
+    }
+
     private func isRateLimited(token: String) -> Bool {
         let now = Date()
         var entries = requestLog[token, default: []].filter { now.timeIntervalSince($0) < rateWindow }
@@ -387,6 +420,13 @@ actor NetworkServer {
         }
         entries.append(now)
         requestLog[token] = entries
+
+        // Periodic cleanup: remove stale tokens
+        if requestLog.count > 10 {
+            requestLog = requestLog.filter { _, dates in
+                dates.contains { now.timeIntervalSince($0) < rateWindow }
+            }
+        }
         return false
     }
 
