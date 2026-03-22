@@ -34,6 +34,18 @@ final class AppState {
     var protectedDataAvailable: Bool = true
     var healthAuthorizationStatus: Bool = false
 
+    // Cockpit sync state
+    private let cockpitClient = CockpitAPIClient()
+    var isCockpitSyncing: Bool = false
+    var cockpitSyncProgress: String = ""
+    var cockpitSyncResult: CockpitSyncResult?
+
+    enum CockpitSyncResult: Equatable {
+        case success(sent: Int, ingested: Int, skipped: Int, failed: Int)
+        case noNewData
+        case error(String)
+    }
+
     init(modelContainer: ModelContainer, backgroundTaskManager: BackgroundTaskManaging = UIApplication.shared) {
         self.modelContainer = modelContainer
         self.auditService = AuditService(modelContainer: modelContainer)
@@ -283,6 +295,128 @@ final class AppState {
             }
         }
         return address
+    }
+
+    // MARK: - Cockpit Sync
+
+    /// Sends only new data since the last sync for each type.
+    /// Queries VPS `/api/healthsync/last-sync` to get the latest timestamp per type,
+    /// then fetches HealthKit data from that point forward.
+    func sendIncremental() async {
+        guard !isCockpitSyncing else { return }
+        isCockpitSyncing = true
+        cockpitSyncResult = nil
+        cockpitSyncProgress = "Checking last sync..."
+        defer { isCockpitSyncing = false }
+
+        do {
+            let lastSyncDates = try await cockpitClient.fetchLastSync()
+            let enabledTypes = syncConfiguration.enabledTypes
+            let now = Date()
+            var allSamples: [HealthSampleDTO] = []
+
+            for type in enabledTypes {
+                let startDate = lastSyncDates[type.rawValue] ?? now.addingTimeInterval(-86400)
+                cockpitSyncProgress = "Fetching \(type.displayName)..."
+                let response = await healthService.fetchSamples(
+                    types: [type], startDate: startDate, endDate: now, limit: 5000, offset: 0
+                )
+                allSamples.append(contentsOf: response.samples)
+            }
+
+            if allSamples.isEmpty {
+                cockpitSyncResult = .noNewData
+                cockpitSyncProgress = ""
+                return
+            }
+
+            cockpitSyncProgress = "Sending \(allSamples.count) samples..."
+            let result = try await cockpitClient.sendSamples(allSamples) { sent, total in
+                Task { @MainActor in
+                    self.cockpitSyncProgress = "Sent \(sent)/\(total)..."
+                }
+            }
+
+            syncConfiguration.lastCockpitSyncAt = now
+            syncConfiguration.lastExportAt = now
+            try modelContainer.mainContext.save()
+
+            await auditService.record(eventType: "cockpit.sync", details: [
+                "mode": "incremental",
+                "sent": String(result.totalSent),
+                "ingested": String(result.totalIngested),
+                "skipped": String(result.totalSkipped),
+                "failed": String(result.totalFailed)
+            ])
+
+            cockpitSyncResult = .success(sent: result.totalSent, ingested: result.totalIngested, skipped: result.totalSkipped, failed: result.totalFailed)
+            cockpitSyncProgress = ""
+        } catch {
+            cockpitSyncResult = .error(error.localizedDescription)
+            cockpitSyncProgress = ""
+            AppLoggers.app.error("Cockpit incremental sync failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Sends all health data from the last N days.
+    func sendWindow(days: Int) async {
+        guard !isCockpitSyncing else { return }
+        isCockpitSyncing = true
+        cockpitSyncResult = nil
+        cockpitSyncProgress = "Fetching last \(days) days..."
+        defer { isCockpitSyncing = false }
+
+        do {
+            let now = Date()
+            let startDate = Calendar.current.date(byAdding: .day, value: -days, to: now) ?? now
+            let enabledTypes = syncConfiguration.enabledTypes
+            var allSamples: [HealthSampleDTO] = []
+
+            for type in enabledTypes {
+                cockpitSyncProgress = "Fetching \(type.displayName)..."
+                let response = await healthService.fetchSamples(
+                    types: [type], startDate: startDate, endDate: now, limit: 5000, offset: 0
+                )
+                allSamples.append(contentsOf: response.samples)
+            }
+
+            if allSamples.isEmpty {
+                cockpitSyncResult = .noNewData
+                cockpitSyncProgress = ""
+                return
+            }
+
+            cockpitSyncProgress = "Sending \(allSamples.count) samples..."
+            let result = try await cockpitClient.sendSamples(allSamples) { sent, total in
+                Task { @MainActor in
+                    self.cockpitSyncProgress = "Sent \(sent)/\(total)..."
+                }
+            }
+
+            syncConfiguration.lastCockpitSyncAt = now
+            syncConfiguration.lastExportAt = now
+            try modelContainer.mainContext.save()
+
+            await auditService.record(eventType: "cockpit.sync", details: [
+                "mode": "window",
+                "days": String(days),
+                "sent": String(result.totalSent),
+                "ingested": String(result.totalIngested),
+                "skipped": String(result.totalSkipped),
+                "failed": String(result.totalFailed)
+            ])
+
+            cockpitSyncResult = .success(sent: result.totalSent, ingested: result.totalIngested, skipped: result.totalSkipped, failed: result.totalFailed)
+            cockpitSyncProgress = ""
+        } catch {
+            cockpitSyncResult = .error(error.localizedDescription)
+            cockpitSyncProgress = ""
+            AppLoggers.app.error("Cockpit window sync failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func clearCockpitResult() {
+        cockpitSyncResult = nil
     }
 
     private func handleProtectedDataAvailable() {

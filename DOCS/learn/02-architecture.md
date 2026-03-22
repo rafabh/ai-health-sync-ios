@@ -474,6 +474,7 @@ actor HealthKitService {
 | `CertificateService` | TLS certificate management |
 | `KeychainStore` | Secure storage |
 | `AuditService` | Security event logging |
+| `CockpitAPIClient` | Direct iPhone→VPS health data sync |
 
 ---
 
@@ -756,6 +757,7 @@ graph TD
     Services --> Network[Network/]
     Services --> Security[Security/]
     Services --> Audit[Audit/]
+    Services --> API[API/]
 
     style App fill:#fff4e1
     style Features fill:#e1f5ff
@@ -774,6 +776,7 @@ graph TD
 | Understand the server | `Services/Network/NetworkServer.swift` |
 | See security implementation | `Services/Security/` |
 | Check audit logging | `Services/Audit/AuditService.swift` |
+| See VPS direct sync | `Services/API/CockpitAPIClient.swift` |
 | View app state management | `App/AppState.swift` |
 
 ---

@@ -9,12 +9,14 @@ final class SyncConfiguration {
     @Attribute(.unique) var id: UUID
     var enabledTypesCSV: String
     var lastExportAt: Date?
+    var lastCockpitSyncAt: Date?
     var createdAt: Date
 
-    init(id: UUID = UUID(), enabledTypes: [HealthDataType] = HealthDataType.allCases, lastExportAt: Date? = nil, createdAt: Date = Date()) {
+    init(id: UUID = UUID(), enabledTypes: [HealthDataType] = HealthDataType.allCases, lastExportAt: Date? = nil, lastCockpitSyncAt: Date? = nil, createdAt: Date = Date()) {
         self.id = id
         self.enabledTypesCSV = Self.serialize(types: enabledTypes)
         self.lastExportAt = lastExportAt
+        self.lastCockpitSyncAt = lastCockpitSyncAt
         self.createdAt = createdAt
     }
 

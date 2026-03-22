@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-HealthSync Helper App - Secure peer-to-peer HealthKit sync between iPhone and Mac. No cloud.
+HealthSync Helper App - HealthKit sync with two modes:
+1. **Local P2P:** iPhone↔Mac via mTLS (original)
+2. **Direct to VPS:** iPhone→Cockpit Executivo API via HTTP (incremental + manual window)
 
 ## Apple Platforms
 - For Swift / iOS/iPadOS 26 code, look for info in:
@@ -47,6 +49,8 @@ IMPORTANT - Know these before coding:
 | HTTP server | `iOS Health Sync App/iOS Health Sync App/Services/Network/NetworkServer.swift` |
 | TLS certs | `iOS Health Sync App/iOS Health Sync App/Services/Security/CertificateService.swift` |
 | Health queries | `iOS Health Sync App/iOS Health Sync App/Services/HealthKit/HealthKitService.swift` |
+| VPS API client | `iOS Health Sync App/iOS Health Sync App/Services/API/CockpitAPIClient.swift` |
+| Cockpit sync UI | `iOS Health Sync App/iOS Health Sync App/Features/CockpitSyncView.swift` |
 | CLI | `macOS/HealthSyncCLI/Sources/HealthSyncCLI/main.swift` |
 
 ## Deep Dives

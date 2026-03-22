@@ -20,6 +20,7 @@ struct ContentView: View {
             List {
                 statusSection
                 permissionsSection
+                CockpitSyncSection()
                 serverSection
                 pairingSection
                 dataTypesSection
