@@ -100,6 +100,8 @@ final class AppState {
             AppLoggers.app.info("Background time expired; stopping server for safety.")
             Task { await self.stopServer() }
         }
+        // Cockpit API key is configured via the Setup sheet in CockpitSyncView (stored in Keychain).
+
         // Notification observers are started from the App entry point on the main actor.
     }
 
@@ -299,9 +301,39 @@ final class AppState {
 
     // MARK: - Cockpit Sync
 
+    /// Fetches all samples for a type with pagination (no 5000 limit).
+    private func fetchAllSamples(type: HealthDataType, startDate: Date, endDate: Date) async -> [HealthSampleDTO] {
+        var allSamples: [HealthSampleDTO] = []
+        var offset = 0
+        let pageSize = 5000
+
+        while true {
+            let response = await healthService.fetchSamples(
+                types: [type], startDate: startDate, endDate: endDate, limit: pageSize, offset: offset
+            )
+            allSamples.append(contentsOf: response.samples)
+
+            guard response.hasMore else { break }
+            offset += pageSize
+        }
+
+        return allSamples
+    }
+
+    /// Sends samples for a single type to the VPS, streaming per-type to avoid memory buildup.
+    private func sendTypeToVPS(type: HealthDataType, samples: [HealthSampleDTO], cumulativeSent: Int, totalEstimate: Int) async throws -> CockpitAPIClient.SendResult {
+        cockpitSyncProgress = "Sending \(type.displayName) (\(samples.count))..."
+        var offset = cumulativeSent
+        let result = try await cockpitClient.sendSamples(samples) { sent, _ in
+            Task { @MainActor in
+                self.cockpitSyncProgress = "Sent \(offset + sent)/\(totalEstimate)..."
+            }
+        }
+        return result
+    }
+
     /// Sends only new data since the last sync for each type.
-    /// Queries VPS `/api/healthsync/last-sync` to get the latest timestamp per type,
-    /// then fetches HealthKit data from that point forward.
+    /// Queries VPS `/api/healthsync/last-sync`, with fallback to local lastCockpitSyncAt.
     func sendIncremental() async {
         guard !isCockpitSyncing else { return }
         isCockpitSyncing = true
@@ -310,31 +342,42 @@ final class AppState {
         defer { isCockpitSyncing = false }
 
         do {
-            let lastSyncDates = try await cockpitClient.fetchLastSync()
+            // Try VPS first, fallback to local
+            var lastSyncDates: [String: Date]
+            do {
+                lastSyncDates = try await cockpitClient.fetchLastSync()
+            } catch {
+                AppLoggers.app.warning("Failed to fetch last-sync from VPS, using local fallback: \(error.localizedDescription, privacy: .public)")
+                let fallbackDate = syncConfiguration.lastCockpitSyncAt ?? Date().addingTimeInterval(-86400)
+                lastSyncDates = Dictionary(uniqueKeysWithValues: syncConfiguration.enabledTypes.map { ($0.rawValue, fallbackDate) })
+            }
+
             let enabledTypes = syncConfiguration.enabledTypes
             let now = Date()
-            var allSamples: [HealthSampleDTO] = []
+            var aggregate = CockpitAPIClient.SendResult()
+            var totalFetched = 0
 
+            // Fetch counts first for progress estimate
             for type in enabledTypes {
                 let startDate = lastSyncDates[type.rawValue] ?? now.addingTimeInterval(-86400)
                 cockpitSyncProgress = "Fetching \(type.displayName)..."
-                let response = await healthService.fetchSamples(
-                    types: [type], startDate: startDate, endDate: now, limit: 5000, offset: 0
-                )
-                allSamples.append(contentsOf: response.samples)
+                let samples = await fetchAllSamples(type: type, startDate: startDate, endDate: now)
+
+                if samples.isEmpty { continue }
+                totalFetched += samples.count
+
+                let result = try await sendTypeToVPS(type: type, samples: samples, cumulativeSent: aggregate.totalSent + aggregate.totalFailed, totalEstimate: totalFetched)
+                aggregate.totalSent += result.totalSent
+                aggregate.totalIngested += result.totalIngested
+                aggregate.totalSkipped += result.totalSkipped
+                aggregate.totalFailed += result.totalFailed
+                aggregate.batchesSent += result.batchesSent
             }
 
-            if allSamples.isEmpty {
+            if aggregate.totalSent == 0 && aggregate.totalFailed == 0 {
                 cockpitSyncResult = .noNewData
                 cockpitSyncProgress = ""
                 return
-            }
-
-            cockpitSyncProgress = "Sending \(allSamples.count) samples..."
-            let result = try await cockpitClient.sendSamples(allSamples) { sent, total in
-                Task { @MainActor in
-                    self.cockpitSyncProgress = "Sent \(sent)/\(total)..."
-                }
             }
 
             syncConfiguration.lastCockpitSyncAt = now
@@ -343,13 +386,13 @@ final class AppState {
 
             await auditService.record(eventType: "cockpit.sync", details: [
                 "mode": "incremental",
-                "sent": String(result.totalSent),
-                "ingested": String(result.totalIngested),
-                "skipped": String(result.totalSkipped),
-                "failed": String(result.totalFailed)
+                "sent": String(aggregate.totalSent),
+                "ingested": String(aggregate.totalIngested),
+                "skipped": String(aggregate.totalSkipped),
+                "failed": String(aggregate.totalFailed)
             ])
 
-            cockpitSyncResult = .success(sent: result.totalSent, ingested: result.totalIngested, skipped: result.totalSkipped, failed: result.totalFailed)
+            cockpitSyncResult = .success(sent: aggregate.totalSent, ingested: aggregate.totalIngested, skipped: aggregate.totalSkipped, failed: aggregate.totalFailed)
             cockpitSyncProgress = ""
         } catch {
             cockpitSyncResult = .error(error.localizedDescription)
@@ -370,27 +413,28 @@ final class AppState {
             let now = Date()
             let startDate = Calendar.current.date(byAdding: .day, value: -days, to: now) ?? now
             let enabledTypes = syncConfiguration.enabledTypes
-            var allSamples: [HealthSampleDTO] = []
+            var aggregate = CockpitAPIClient.SendResult()
+            var totalFetched = 0
 
             for type in enabledTypes {
                 cockpitSyncProgress = "Fetching \(type.displayName)..."
-                let response = await healthService.fetchSamples(
-                    types: [type], startDate: startDate, endDate: now, limit: 5000, offset: 0
-                )
-                allSamples.append(contentsOf: response.samples)
+                let samples = await fetchAllSamples(type: type, startDate: startDate, endDate: now)
+
+                if samples.isEmpty { continue }
+                totalFetched += samples.count
+
+                let result = try await sendTypeToVPS(type: type, samples: samples, cumulativeSent: aggregate.totalSent + aggregate.totalFailed, totalEstimate: totalFetched)
+                aggregate.totalSent += result.totalSent
+                aggregate.totalIngested += result.totalIngested
+                aggregate.totalSkipped += result.totalSkipped
+                aggregate.totalFailed += result.totalFailed
+                aggregate.batchesSent += result.batchesSent
             }
 
-            if allSamples.isEmpty {
+            if aggregate.totalSent == 0 && aggregate.totalFailed == 0 {
                 cockpitSyncResult = .noNewData
                 cockpitSyncProgress = ""
                 return
-            }
-
-            cockpitSyncProgress = "Sending \(allSamples.count) samples..."
-            let result = try await cockpitClient.sendSamples(allSamples) { sent, total in
-                Task { @MainActor in
-                    self.cockpitSyncProgress = "Sent \(sent)/\(total)..."
-                }
             }
 
             syncConfiguration.lastCockpitSyncAt = now
@@ -400,13 +444,13 @@ final class AppState {
             await auditService.record(eventType: "cockpit.sync", details: [
                 "mode": "window",
                 "days": String(days),
-                "sent": String(result.totalSent),
-                "ingested": String(result.totalIngested),
-                "skipped": String(result.totalSkipped),
-                "failed": String(result.totalFailed)
+                "sent": String(aggregate.totalSent),
+                "ingested": String(aggregate.totalIngested),
+                "skipped": String(aggregate.totalSkipped),
+                "failed": String(aggregate.totalFailed)
             ])
 
-            cockpitSyncResult = .success(sent: result.totalSent, ingested: result.totalIngested, skipped: result.totalSkipped, failed: result.totalFailed)
+            cockpitSyncResult = .success(sent: aggregate.totalSent, ingested: aggregate.totalIngested, skipped: aggregate.totalSkipped, failed: aggregate.totalFailed)
             cockpitSyncProgress = ""
         } catch {
             cockpitSyncResult = .error(error.localizedDescription)
@@ -417,6 +461,34 @@ final class AppState {
 
     func clearCockpitResult() {
         cockpitSyncResult = nil
+    }
+
+    /// Check if Cockpit API is configured (API key in Keychain).
+    var isCockpitConfigured: Bool {
+        get async { await cockpitClient.isConfigured }
+    }
+
+    /// Fetches sync delta: how many samples are pending per enabled type.
+    func fetchSyncDelta() async -> SyncDelta? {
+        guard let lastSyncDates = try? await cockpitClient.fetchLastSync() else { return nil }
+
+        // Only check types the VPS actually accepts (has entries in last-sync or is in enabledTypes AND known by VPS)
+        let vpsKnownTypes = Set(lastSyncDates.keys)
+        let enabledTypes = syncConfiguration.enabledTypes.filter { vpsKnownTypes.contains($0.rawValue) || lastSyncDates[$0.rawValue] != nil }
+        let now = Date()
+        var types: [SyncDelta.TypeDelta] = []
+
+        for type in enabledTypes {
+            let lastSync = lastSyncDates[type.rawValue] ?? Date.distantPast
+            let response = await healthService.fetchSamples(
+                types: [type], startDate: lastSync, endDate: now, limit: 5000, offset: 0
+            )
+            if response.returnedCount > 0 {
+                types.append(.init(name: type.displayName, pending: response.returnedCount, since: lastSync))
+            }
+        }
+
+        return SyncDelta(types: types)
     }
 
     private func handleProtectedDataAvailable() {
