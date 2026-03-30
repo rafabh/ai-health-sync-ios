@@ -11,7 +11,7 @@ struct CockpitSyncSection: View {
     @State private var showingSetup: Bool = false
     @State private var syncDelta: SyncDelta?
     @State private var isLoadingDelta: Bool = false
-    @State private var isDeltaExpanded: Bool = true
+    @State private var isDeltaExpanded: Bool = false
     private let dayOptions = [1, 3, 7, 14, 30, 90, 180]
 
     var body: some View {
@@ -29,8 +29,7 @@ struct CockpitSyncSection: View {
                 reconfigureButton
             }
         }
-        .animation(.smooth, value: appState.isCockpitSyncing)
-        .animation(.smooth, value: appState.cockpitSyncResult != nil)
+        .transaction { $0.animation = nil }
         .task { await checkConfiguration() }
         .sheet(isPresented: $showingSetup) { CockpitSetupView(isConfigured: $isConfigured) }
     }
