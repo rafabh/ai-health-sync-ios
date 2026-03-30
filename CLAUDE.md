@@ -53,6 +53,13 @@ IMPORTANT - Know these before coding:
 | Cockpit sync UI | `iOS Health Sync App/iOS Health Sync App/Features/CockpitSyncView.swift` |
 | CLI | `macOS/HealthSyncCLI/Sources/HealthSyncCLI/main.swift` |
 
+## Git Workflow
+
+- Solo developer — commit and push directly to `master`
+- Do NOT create git tags, branches, or PRs
+- Keep the GitHub repo clean: no extra branches, no tags
+- Run lint and tests before pushing, not on every commit
+
 ## Deep Dives
 
 - Architecture: `DOCS/learn/02-architecture.md`
