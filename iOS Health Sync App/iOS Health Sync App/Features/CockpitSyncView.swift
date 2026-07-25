@@ -266,7 +266,7 @@ struct CockpitSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var isConfigured: Bool
     @State private var apiKey: String = ""
-    @State private var baseURL: String = "http://srv1421979.hstgr.cloud"
+    @State private var baseURL: String = "http://100.101.245.115"
     @State private var error: String?
 
     var body: some View {

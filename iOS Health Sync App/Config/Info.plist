@@ -14,16 +14,12 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- VPS é acessado via Tailscale por IP (http cleartext, rede privada). Arbitrary loads
+	     evita travar o ATS por mudança de IP/host. App é dev-only (sem App Store). -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>srv1421979.hstgr.cloud</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-		</dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
 	</dict>
 	<key>NSBonjourServices</key>
 	<array>

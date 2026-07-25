@@ -7,8 +7,11 @@ import os
 actor CockpitAPIClient {
     private static let keychainService = "com.rafael.healthsync.cockpit"
     private static let keychainAccountAPIKey = "api-key"
-    private static let keychainAccountBaseURL = "base-url"
-    private static let defaultBaseURL = "http://srv1421979.hstgr.cloud"
+    // "base-url-v2": orfana o valor antigo (host público) salvo no Keychain pra o novo default
+    // Tailscale valer sem o usuário redigitar nada. A API key (conta "api-key") fica intacta.
+    private static let keychainAccountBaseURL = "base-url-v2"
+    // IP Tailscale do VPS (srv1421979). Editável em Cockpit Setup se o IP da tailnet mudar.
+    private static let defaultBaseURL = "http://100.101.245.115"
     private static let batchSize = 500
 
     private let session: URLSession

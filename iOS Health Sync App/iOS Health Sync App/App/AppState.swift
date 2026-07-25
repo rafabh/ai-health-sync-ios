@@ -323,7 +323,7 @@ final class AppState {
     /// Sends samples for a single type to the VPS, streaming per-type to avoid memory buildup.
     private func sendTypeToVPS(type: HealthDataType, samples: [HealthSampleDTO], cumulativeSent: Int, totalEstimate: Int) async throws -> CockpitAPIClient.SendResult {
         cockpitSyncProgress = "Sending \(type.displayName) (\(samples.count))..."
-        var offset = cumulativeSent
+        let offset = cumulativeSent
         let result = try await cockpitClient.sendSamples(samples) { sent, _ in
             Task { @MainActor in
                 self.cockpitSyncProgress = "Sent \(offset + sent)/\(totalEstimate)..."
