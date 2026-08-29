@@ -41,18 +41,6 @@ IMPORTANT - Know these before coding:
 - All secrets in Keychain via `KeychainStore` - NEVER in config files or UserDefaults
 - All health data access MUST be logged via `AuditService`
 
-## Entry Points
-
-| Component | File |
-|-----------|------|
-| iOS state | `iOS Health Sync App/iOS Health Sync App/App/AppState.swift` |
-| HTTP server | `iOS Health Sync App/iOS Health Sync App/Services/Network/NetworkServer.swift` |
-| TLS certs | `iOS Health Sync App/iOS Health Sync App/Services/Security/CertificateService.swift` |
-| Health queries | `iOS Health Sync App/iOS Health Sync App/Services/HealthKit/HealthKitService.swift` |
-| VPS API client | `iOS Health Sync App/iOS Health Sync App/Services/API/CockpitAPIClient.swift` |
-| Cockpit sync UI | `iOS Health Sync App/iOS Health Sync App/Features/CockpitSyncView.swift` |
-| CLI | `macOS/HealthSyncCLI/Sources/HealthSyncCLI/main.swift` |
-
 ## Git Workflow
 
 - Solo developer — commit and push directly to `master`
